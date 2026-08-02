@@ -14,6 +14,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -21,16 +22,24 @@ import androidx.appcompat.app.AppCompatActivity;
 public class LoginActivity extends AppCompatActivity {
 
     public static final String EXTRA_SERVER = "server";
+
     private String server;
     private WebView web;
+    private TextView errorView;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable poll = new Runnable() {
         @Override
         public void run() {
-            if (!isFinishing() && !isDestroyed() && tryCaptureToken()) {
-                return; // done
+            if (!isFinishing() && !isDestroyed()) {
+                try {
+                    if (tryCaptureToken()) {
+                        return;
+                    }
+                } catch (Throwable t) {
+                    showError("Poll error: " + dump(t));
+                }
             }
-            handler.postDelayed(this, 500);
+            handler.postDelayed(this, 700);
         }
     };
 
@@ -38,7 +47,21 @@ public class LoginActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        try {
+            buildUi();
+        } catch (Throwable t) {
+            showError("onCreate failed: " + dump(t));
+            return;
+        }
+        try {
+            String url = server + "/login/index.php";
+            web.loadUrl(url);
+        } catch (Throwable t) {
+            showError("loadUrl failed: " + dump(t));
+        }
+    }
 
+    private void buildUi() {
         server = getIntent().getStringExtra(EXTRA_SERVER);
         if (server == null || server.isEmpty()) {
             server = "https://elearning.kfu.edu.eg";
@@ -46,13 +69,13 @@ public class LoginActivity extends AppCompatActivity {
         if (!server.startsWith("http://") && !server.startsWith("https://")) {
             server = "https://" + server;
         }
+        serverUrl = server;
 
         try {
             CookieManager.getInstance().setAcceptCookie(true);
         } catch (Throwable ignored) {
         }
 
-        // Layout: top return bar + webview below it.
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.parseColor("#0f172a"));
@@ -79,9 +102,16 @@ public class LoginActivity extends AppCompatActivity {
         });
         bar.addView(close);
 
-        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        root.addView(bar, barLp);
+        root.addView(bar, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        errorView = new TextView(this);
+        errorView.setTextColor(Color.rgb(255, 100, 100));
+        errorView.setTextSize(13);
+        errorView.setPadding(16, 12, 16, 12);
+        errorView.setVisibility(TextView.GONE);
+        root.addView(errorView, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         web = new WebView(this);
         WebSettings s = web.getSettings();
@@ -101,45 +131,40 @@ public class LoginActivity extends AppCompatActivity {
             web.setWebViewClient(new WebViewClient() {
                 @Override
                 public void onPageFinished(WebView view, String url) {
-                    tryCaptureToken();
+                    try {
+                        tryCaptureToken();
+                    } catch (Throwable t) {
+                        showError("onPageFinished: " + dump(t));
+                    }
                 }
             });
         } catch (Throwable ignored) {
         }
 
-        LinearLayout.LayoutParams webLp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-        root.addView(web, webLp);
+        root.addView(web, new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        setContentView(root);
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(root);
+        setContentView(scroll);
 
-        // Poll so the cookie is detected even if login does not call onPageFinished again.
         handler.postDelayed(poll, 800);
-
-        try {
-            String url = server + "/login/index.php";
-            web.loadUrl(url);
-        } catch (Throwable t) {
-            try {
-                startActivity(new Intent(this, MainActivity.class));
-            } catch (Throwable ignored) {
-            }
-        }
     }
+
+    private String serverUrl;
 
     private boolean tryCaptureToken() {
         String cookie = null;
         try {
-            cookie = CookieManager.getInstance().getCookie(server);
+            cookie = CookieManager.getInstance().getCookie(serverUrl);
         } catch (Throwable ignored) {
         }
         if (cookie == null || !cookie.contains("MoodleSession")) {
-            // Some devices store per-host; try bare host.
-            String host = server.replaceFirst("^(https?://)?(www\\.)?", "").replaceFirst("/.*$", "");
+            String host = serverUrl.replaceFirst("^(https?://)?(www\\.)?", "").replaceFirst("/.*$", "");
             try {
                 String c2 = CookieManager.getInstance().getCookie(host);
                 if (c2 != null && c2.contains("MoodleSession")) cookie = c2;
-            } catch (Throwable ignored) {
+            } catch (Throwable ignored2) {
             }
         }
         if (cookie == null || !cookie.contains("MoodleSession")) {
@@ -167,6 +192,31 @@ public class LoginActivity extends AppCompatActivity {
         try { finish(); } catch (Throwable ignored) {
         }
         return true;
+    }
+
+    private void showError(String msg) {
+        handler.post(() -> {
+            try {
+                if (errorView != null) {
+                    errorView.setText(msg);
+                    errorView.setVisibility(TextView.VISIBLE);
+                }
+            } catch (Throwable ignored) {
+            }
+        });
+    }
+
+    private static String dump(Throwable t) {
+        StringBuilder sb = new StringBuilder();
+        if (t != null) {
+            sb.append(t.getClass().getName()).append(": ").append(t.getMessage()).append("\n");
+            for (StackTraceElement e : t.getStackTrace()) {
+                sb.append("  at ").append(e.getClassName()).append(".").append(e.getMethodName())
+                  .append("(").append(e.getFileName()).append(":").append(e.getLineNumber()).append(")\n");
+                if (sb.length() > 3000) break;
+            }
+        }
+        return sb.toString();
     }
 
     @Override
