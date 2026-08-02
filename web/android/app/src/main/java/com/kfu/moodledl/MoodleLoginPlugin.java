@@ -1,6 +1,7 @@
 package com.kfu.moodledl;
 
 import android.content.Intent;
+import android.net.Uri;
 import androidx.activity.result.ActivityResult;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -18,6 +19,19 @@ public class MoodleLoginPlugin extends Plugin {
         Intent intent = new Intent(getActivity(), LoginActivity.class);
         intent.putExtra(LoginActivity.EXTRA_SERVER, server);
         startActivityForResult(call, intent, "loginResult");
+    }
+
+    @PluginMethod
+    public void openBrowser(PluginCall call) {
+        String url = call.getString("url");
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Could not open browser: " + e.getMessage());
+        }
     }
 
     @ActivityCallback
