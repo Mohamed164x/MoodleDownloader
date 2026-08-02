@@ -11,11 +11,12 @@ jobs:
     defaults:
       run:
         working-directory: web
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-- name: Setup Node
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -29,25 +30,15 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*') }}
-
       - name: Install npm deps + sync
         run: |
           npm install
           npx cap sync android
-        working-directory: web
 
       - name: Build debug APK
         run: |
           cd android
           ./gradlew assembleDebug --no-daemon
-        working-directory: web
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
