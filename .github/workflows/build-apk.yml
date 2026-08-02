@@ -35,6 +35,16 @@ jobs:
           npm install
           npx cap sync android
 
+      - name: Patch @capacitor-community/http namespace
+        run: |
+          cd node_modules/@capacitor-community/http/android
+          sed -i "s|    compileSdkVersion project.hasProperty('compileSdkVersion')|    namespace 'com.getcapacitor.http.http'\n    compileSdkVersion project.hasProperty('compileSdkVersion')|" build.gradle
+          sed -i '/package="com.getcapacitor.http.http"/d' src/main/AndroidManifest.xml
+          echo "=== build.gradle namespace ==="
+          grep -A1 'android {' build.gradle | head -3
+          echo "=== manifest ==="
+          cat src/main/AndroidManifest.xml
+
       - name: Build debug APK
         run: |
           cd android
