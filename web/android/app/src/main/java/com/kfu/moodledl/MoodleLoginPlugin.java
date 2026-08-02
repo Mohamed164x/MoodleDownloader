@@ -15,7 +15,6 @@ public class MoodleLoginPlugin extends Plugin {
         String server = call.getString("server", "https://elearning.kfu.edu.eg");
         Intent intent = new Intent(getActivity(), LoginActivity.class);
         intent.putExtra(LoginActivity.EXTRA_SERVER, server);
-        intent.putExtra(LoginActivity.EXTRA_CODE, 1);
         startActivityForResult(call, intent, "loginResult");
     }
 
