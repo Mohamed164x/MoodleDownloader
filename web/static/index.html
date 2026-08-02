@@ -36,15 +36,22 @@
   <h1>KFU Moodle Downloader</h1>
 
   <div class="card" id="card-connect">
-    <h2>Connect to Moodle</h2>
+    <h2>Log in to Moodle</h2>
     <label>Server</label>
     <input id="server" value="https://elearning.kfu.edu.eg">
-    <button id="btnLogin" class="secondary">Log in (opens login page)</button>
-    <div class="row" style="margin:6px 0">
-      <div style="flex:0 0 auto;display:flex;align-items:center;font-size:13px;opacity:.7">or paste cookie:</div>
-      <input id="cookie" placeholder="paste MoodleSession cookie..." style="flex:1">
+    <label>Username</label>
+    <input id="username" autocomplete="username" placeholder="your username">
+    <label>Password</label>
+    <input id="password" type="password" autocomplete="current-password" placeholder="your password">
+    <button id="btnLogin">Log in</button>
+    <div id="loginHint" class="status" style="font-size:12px;opacity:.65;margin-top:4px">
+      Your credentials are sent only to your Moodle server. Nothing is stored.
     </div>
-    <button id="btnConnect">Connect with cookie</button>
+    <details style="margin-top:10px">
+      <summary style="font-size:12px;opacity:.7;cursor:pointer">Advanced: paste a session cookie instead</summary>
+      <input id="cookie" placeholder="paste MoodleSession cookie..." style="margin-top:8px">
+      <button id="btnConnect" class="secondary">Connect with cookie</button>
+    </details>
     <div class="status" id="connectStatus"></div>
   </div>
 
@@ -110,28 +117,60 @@ function statusFrom(r){
 
 $('btnLogin').addEventListener('click', async ()=>{
   BASE=$('server').value.trim().replace(/\/+$/,'')||'https://elearning.kfu.edu.eg';
-  setText('connectStatus','Opening login page...');
+  const user=$('username').value.trim();
+  const pass=$('password').value;
+  if(!user||!pass){ setText('connectStatus','Enter your username and password.','bad'); return; }
+  setText('connectStatus','Logging in...');
   try{
-    // Use the native login screen that auto-captures the MoodleSession cookie.
-    const P=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.MoodleLogin;
-    if(!P){ setText('connectStatus','Login screen only available in the Android app.','bad'); return; }
-    const res=await P.login({ server: BASE });
-    COOKIE=res.cookie;
-    if(COOKIE){ $('cookie').value=''; setText('connectStatus','Logged in!','ok'); }
-    else{ setText('connectStatus','Login succeeded but no cookie was captured.','bad'); return; }
-    // Validate then proceed.
+    const H=http();
+    if(!H){ setText('connectStatus','Login requires the Android app.','bad'); return; }
+
+    // Step 1: fetch login page to grab the CSRF logintoken.
+    const page=await H.request({url:BASE+'/login/index.php', method:'GET',
+      headers:{'User-Agent':'Mozilla/5.0'}, responseType:'text', connectTimeout:20000});
+    let token=null;
+    const html=page && page.data ? String(page.data) : '';
+    const m=html.match(/name="logintoken"\s+value="([^"]+)"/i)||html.match(/name='logintoken'\s+value='([^']+)'/i);
+    token=m&&m[1]?m[1]:null;
+
+    // Step 2: POST the login form.
+    const login=await H.request({url:BASE+'/login/index.php', method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded','User-Agent':'Mozilla/5.0'},
+      data:{username:user, password:pass, logintoken:(token||''), submitbutton:'Log in'},
+      responseType:'text', connectTimeout:20000, disableRedirects:true});
+
+    // Step 3: read the MoodleSession cookie from the shared cookie store.
+    let session=null;
+    try{
+      const ck=await H.getCookies({url:BASE});
+      const arr=(ck && ck.cookies) || [];
+      for(const c of arr){ if((c.key||c.name)==='MoodleSession'){ session=c.value; } }
+    }catch(e){}
+    if(session){ COOKIE=session; }
+    else{
+      // fallback: parse Set-Cookie from response header
+      const hdr=(login.headers||{});
+      const sc=Object.entries(hdr).find(([k,v])=>/set[-_]?cookie/i.test(k));
+      if(sc){ const mm=String(sc[1]).match(/MoodleSession=([^;]+)/i); if(mm) session=mm[1]; }
+      COOKIE=session||'';
+    }
+    if(!COOKIE){ setText('connectStatus','Login failed: no session cookie returned. Check username/password.','bad'); return; }
+
+    // Step 4: validate session
     const r=await moodleGet(BASE+'/index.php');
     const st=statusFrom(r);
-    if(st==='login'){ setText('connectStatus','FAILED: session invalid.','bad'); return; }
+    if(st==='login'){ setText('connectStatus','Login failed: session invalid.','bad'); return; }
     hide('card-connect'); show('card-main');
     setText('who','');
+    setText('connectStatus','Connected.','ok');
   }catch(e){ setText('connectStatus','ERROR: '+(e.message||e),'bad'); }
 });
 
 $('btnConnect').addEventListener('click', async ()=>{
   BASE=$('server').value.trim().replace(/\/+$/,'')||'https://elearning.kfu.edu.eg';
-  COOKIE=$('cookie').value.trim();
-  if(!COOKIE){ setText('connectStatus','Enter a cookie.'); return; }
+  const cookieInput=$('cookie');
+  COOKIE=(cookieInput?cookieInput.value:'').trim();
+  if(!COOKIE){ setText('connectStatus','No cookie entered.'); return; }
   setText('connectStatus','Connecting...');
   try{
     const r=await moodleGet(BASE+'/index.php');
