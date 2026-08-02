@@ -114,11 +114,12 @@ async function loadSemesters(cat){
   setStatus('Loading semesters...');
   try{
     const r=await moodleGet(BASE+'/course/index.php?categoryid='+cat);
+    if (!r || !r.data) { setStatus('Empty response', 'bad'); return; }
     box.innerHTML='<label>Semesters / categories</label>';
     const re=/course\/index\.php\?categoryid=(\d+)"[^>]*>([^<]+)</g; let m; const seen=new Set();
     let found=0;
     while((m=re.exec(r.data))){ const id=m[1]; if(seen.has(id)) continue; seen.add(id);
-      const b=document.createElement('button'); b.textContent=m[2].replace(/^&amp;/g,'&').trim();
+      const b=document.createElement('button'); b.textContent=m[2].replace(/^&/g,'&').trim();
       b.className='secondary'; b.onclick=()=>loadCourses(id); box.appendChild(b); found++; }
     if(!found){ box.innerHTML='<div class="status">No subcategories found here. Tap Back and pick a semester directly.</div>'; }
     hide('step-college'); show('step-semester');
@@ -128,34 +129,40 @@ async function loadSemesters(cat){
 
 async function loadCourses(cat){
   setStatus('Loading courses...');
-  const r=await moodleGet(BASE+'/course/index.php?categoryid='+cat);
-  const re=/course\/view\.php\?id=(\d+)"[^>]*>([^<]+)<\/a>/g; let m;
-  const box=$('step-course'); box.innerHTML='<label>Courses</label>'; const seen=new Set(); let found=0;
-  while((m=re.exec(r.data))){
-    const id=m[1], name=m[2].replace(/<[^>]+>/g,'').trim();
-    if(!id||seen.has(id)) continue; seen.add(id);
-    const b=document.createElement('button'); b.textContent=name; b.className='secondary';
-    b.onclick=()=>loadFiles(id); box.appendChild(b); found++;
-  }
-  if(!found) box.innerHTML+='<div class="status">No courses found.</div>';
-  hide('step-semester'); show('step-course'); setStatus('');
+  try{
+    const r=await moodleGet(BASE+'/course/index.php?categoryid='+cat);
+    if (!r || !r.data) { setStatus('Empty response', 'bad'); return; }
+    const re=/course\/view\.php\?id=(\d+)"[^>]*>([^<]+)<\/a>/g; let m;
+    const box=$('step-course'); box.innerHTML='<label>Courses</label>'; const seen=new Set(); let found=0;
+    while((m=re.exec(r.data))){
+      const id=m[1], name=m[2].replace(/<[^>]+>/g,'').trim();
+      if(!id||seen.has(id)) continue; seen.add(id);
+      const b=document.createElement('button'); b.textContent=name; b.className='secondary';
+      b.onclick=()=>loadFiles(id); box.appendChild(b); found++;
+    }
+    if(!found) box.innerHTML+='<div class="status">No courses found.</div>';
+    hide('step-semester'); show('step-course'); setStatus('');
+  }catch(e){ setStatus('Error: '+(e.message||e),'bad'); }
 }
 
 async function loadFiles(cid){
   setStatus('Loading files...');
-  const r=await moodleGet(BASE+'/course/view.php?id='+cid);
-  const html=r.data;
-  const links=[]; const seen=new Set();
-  const re=/href="(https?:\/\/[^"]*?(?:mod\/resource\/view\.php\?id=\d+|pluginfile\.php\/[^"]+))"/g; let m;
-  while((m=re.exec(html))){ const url=m[1].replace(/&amp;/g,'&'); if(!seen.has(url)){seen.add(url);links.push(url);} }
-  const items=[];
-  for(const url of links){
-    let name=url.split('/').pop();
-    if(/mod\/resource\/view\.php/.test(url)) name=decodeURIComponent((url.match(/[?&]filename=([^&]+)/)||[])[1]||url.split('resource=').pop()||'file')||'file';
-    else if(/pluginfile\.php/.test(url)) name=decodeURIComponent(url.split('pluginfile.php')[1].split('/').pop());
-    items.push({name:name||'file', url});
-  }
-  renderFiles(items); setStatus('');
+  try{
+    const r=await moodleGet(BASE+'/course/view.php?id='+cid);
+    if (!r || !r.data) { setStatus('Empty response', 'bad'); return; }
+    const html=r.data;
+    const links=[]; const seen=new Set();
+    const re=/href="(https?:\/\/[^"]*?(?:mod\/resource\/view\.php\?id=\d+|pluginfile\.php\/[^"]+))"/g; let m;
+    while((m=re.exec(html))){ const url=m[1].replace(/&/g,'&'); if(!seen.has(url)){seen.add(url);links.push(url);} }
+    const items=[];
+    for(const url of links){
+      let name=url.split('/').pop();
+      if(/mod\/resource\/view\.php/.test(url)) name=decodeURIComponent((url.match(/[?&]filename=([^&]+)/)||[])[1]||url.split('resource=').pop()||'file')||'file';
+      else if(/pluginfile\.php/.test(url)) name=decodeURIComponent(url.split('pluginfile.php')[1].split('/').pop());
+      items.push({name:name||'file', url});
+    }
+    renderFiles(items); setStatus('');
+  }catch(e){ setStatus('Error: '+(e.message||e),'bad'); }
 }
 
 function renderFiles(items){

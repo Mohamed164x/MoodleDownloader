@@ -2,11 +2,11 @@ package com.kfu.moodledl;
 
 import android.os.Bundle;
 import android.util.Log;
-import java.io.FileOutputStream;
 import android.widget.Toast;
 
 import com.getcapacitor.BridgeActivity;
 
+import java.io.FileOutputStream;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.PrintWriter;
@@ -41,7 +41,11 @@ public class MainActivity extends BridgeActivity {
             }
         });
 
-        registerPlugin(MoodleLoginPlugin.class);
+        try {
+            registerPlugin(MoodleLoginPlugin.class);
+        } catch (Throwable t) {
+            Log.e("KFUINIT", "Plugin registration failed", t);
+        }
         super.onCreate(savedInstanceState);
     }
 }
