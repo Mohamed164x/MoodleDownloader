@@ -40,16 +40,20 @@
     <label>Server</label>
     <input id="server" value="https://elearning.kfu.edu.eg">
     <button id="btnLogin">Log in in Chrome</button>
-    <ol style="font-size:12px;opacity:.8;margin:8px 0 4px;padding-left:18px">
-      <li>Tap above to open Moodle's login in Chrome.</li>
-      <li>Log in there with your university account.</li>
-      <li>After login, open Chrome menu → copy the value of the
-          <b>MoodleSession</b> cookie (site: elearning.kfu.edu.eg).</li>
-      <li>Paste it below and tap <b>Connect</b>.</li>
-    </ol>
-    <label>MoodleSession cookie</label>
-    <input id="cookie" placeholder="paste cookie value...">
-    <button id="btnConnect">Connect</button>
+    <div style="font-size:12px;opacity:.8;margin:10px 0 0;padding:8px;background:#0b1120;border-radius:8px;line-height:1.5">
+      <b>How to get the cookie:</b><br>
+      1. Tap the button above → log in in Chrome.<br>
+      2. On the mobile site, if you already <b>logged in</b>, the easiest way is to
+      open this same login URL in Chrome, and Moodle will show you're logged in.<br>
+      3. The cookie value is what Moodle uses to keep you signed in.<br>
+      Below, paste it into the box and tap <b>Connect</b>. Or skip this and just
+      paste a saved cookie you already have.
+    </div>
+    <div style="border:2px solid var(--accent);border-radius:10px;padding:12px;margin-top:12px">
+      <label>Paste your MoodleSession cookie here</label>
+      <input id="cookie" placeholder="e.g. 1igmbc9iiej7tvv6hvm83qor5u..." autofocus>
+      <button id="btnConnect">Connect</button>
+    </div>
     <div class="status" id="connectStatus"></div>
   </div>
 
