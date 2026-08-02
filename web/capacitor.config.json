@@ -1,0 +1,9 @@
+{
+  "appId": "com.kfu.moodledl",
+  "appName": "KFU Moodle Downloader",
+  "webDir": "static",
+  "android": {
+    "allowMixedContent": true,
+    "usesCleartextTraffic": true
+  }
+}

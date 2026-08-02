@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>KFU Moodle Downloader</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --accent:#38bdf8; --ok:#4ade80; --bad:#f87171; --txt:#e2e8f0; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+         background:var(--bg); color:var(--txt); }
+  .wrap { max-width:640px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:4px 0 12px; }
+  .card { background:var(--card); border-radius:12px; padding:16px; margin-bottom:14px; }
+  .card h2 { margin:0 0 10px; font-size:15px; color:var(--accent); }
+  label { display:block; font-size:13px; opacity:.85; margin:8px 0 4px; }
+  input, select, button { width:100%; padding:12px; font-size:16px; border-radius:8px;
+         border:1px solid #334155; background:#0f172a; color:var(--txt); margin-bottom:6px; }
+  button { background:var(--accent); color:#06283d; font-weight:700; border:none; cursor:pointer; }
+  button.secondary { background:#334155; color:var(--txt); }
+  .row { display:flex; gap:8px; } .row > * { flex:1; }
+  .file-item { display:flex; align-items:center; gap:10px; padding:10px 0;
+               border-bottom:1px solid #1e293b; } .file-item:last-child { border-bottom:none; }
+  .fname { flex:1; font-size:14px; word-break:break-all; }
+  .status { font-size:13px; } .ok { color:var(--ok); } .bad { color:var(--bad); }
+  .log { background:#0b1120; border-radius:8px; padding:10px; font-size:12px; max-height:240px;
+         overflow:auto; white-space:pre-wrap; font-family:monospace; }
+  .hidden { display:none; } .btn-mini { width:auto; padding:8px 12px; font-size:14px; }
+  .tag { display:inline-block; background:#0b1120; padding:2px 8px; border-radius:6px;
+         font-size:12px; color:var(--accent); }
+</style>
+<script src="capacitor.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <h1>KFU Moodle Downloader</h1>
+
+  <div class="card" id="card-connect">
+    <h2>Connect to Moodle</h2>
+    <label>Server</label>
+    <input id="server" value="https://elearning.kfu.edu.eg">
+    <label>MoodleSession cookie (from browser DevTools)</label>
+    <input id="cookie" placeholder="paste cookie...">
+    <button id="btnConnect">Connect</button>
+    <div class="status" id="connectStatus"></div>
+  </div>
+
+  <div class="card hidden" id="card-main">
+    <h2 id="breadcrumb">Browse <span class="tag" id="who"></span></h2>
+    <div id="step-college">
+      <label>College</label>
+      <div class="row">
+        <button class="secondary" data-college="25">Medicine</button>
+        <button class="secondary" data-college="21">Dental</button>
+        <button class="secondary" data-college="15">Pharmacy</button>
+      </div>
+    </div>
+    <div id="step-semester" class="hidden"></div>
+    <div id="step-course" class="hidden"></div>
+    <div id="step-files" class="hidden"></div>
+    <button id="btnBack" class="secondary hidden" style="margin-top:10px">Back</button>
+  </div>
+
+  <div class="card hidden" id="card-log">
+    <h2>Status</h2>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const show=id=>$(id).classList.remove('hidden');
+const hide=id=>$(id).classList.add('hidden');
+const setText=(id,t,c)=>{ $(id).textContent=t; if(c)$(id).className=c; };
+const log=id=>{};
+const esc=s=>(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+let BASE='', COOKIE='', college=null;
+
+// ---- native HTTP via Capacitor (bypasses CORS, stores cookie on Moodle domain) ----
+function http(){
+  if(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Http){
+    return window.Capacitor.Plugins.Http;
+  }
+  return null; // browser fallback below
+}
+async function moodleGet(url, binary){
+  const H=http();
+  const headers={Cookie:'MoodleSession='+COOKIE, 'User-Agent':'Mozilla/5.0'};
+  if(H){
+    const r=await H.request({url:url, method:'GET', headers:headers,
+       responseType: binary?'arraybuffer':'text', connectTimeout:20000});
+    return r; // {status, data, headers}
+  }
+  const r=await fetch(url,{headers, credentials:'omit'});
+  const data= binary? await r.arrayBuffer() : await r.text();
+  return {status:r.status, data, headers:{}};
+}
+function statusFrom(r){
+  // Moodle login redirect => 303 to /login/index.php
+  if(r.status>=400) return 'error '+r.status;
+  const loc=r.headers && r.headers.Location;
+  if(loc && /login\/index\.php/.test(loc)) return 'login';
+  if(typeof r.data==='string' && /login\/index\.php/.test(r.data)) return 'login';
+  return 'ok';
+}
+
+$('btnConnect').addEventListener('click', async ()=>{
+  BASE=$('server').value.trim().replace(/\/+$/,'')||'https://elearning.kfu.edu.eg';
+  COOKIE=$('cookie').value.trim();
+  if(!COOKIE){ setText('connectStatus','Enter a cookie.'); return; }
+  setText('connectStatus','Connecting...');
+  try{
+    const r=await moodleGet(BASE+'/index.php');
+    const st=statusFrom(r);
+    if(st==='login'){ setText('connectStatus','FAILED: cookie invalid/expired.','bad'); return; }
+    hide('card-connect'); show('card-main');
+    setText('connectStatus','Connected.','ok');
+    setText('who','');
+  }catch(e){ setText('connectStatus','ERROR: '+e.message,'bad'); }
+});
+
+// ---- list helpers ----
+async function loadSemesters(){
+  const box=$('step-semester'); box.innerHTML='<label>Semester</label>';
+  const r=await moodleGet(BASE+'/course/index.php?categoryid='+college);
+  box.innerHTML='<label>Semesters</label>';
+  const re=/course\/index\.php\?categoryid=(\d+)"[^>]*>([^<]+)</g; let m; const seen=new Set();
+  while((m=re.exec(r.data))){
+    const id=m[1]; if(seen.has(id)) continue; seen.add(id);
+    const b=document.createElement('button'); b.textContent=m[2].replace(/^&amp;/g,'&').trim();
+    b.className='secondary'; b.onclick=()=>loadCourses(id); box.appendChild(b);
+  }
+  hide('step-college'); show('step-semester');
+}
+
+// The college buttons directly jump to the top category's course list.
+async function loadSemestersDynamic(cat){
+  const box=$('step-semester'); box.innerHTML='<label>Loading...</label>';
+  const r=await moodleGet(BASE+'/course/index.php?categoryid='+cat);
+  box.innerHTML='<label>Semesters</label>';
+  const re=/course\/index\.php\?categoryid=(\d+)"[^>]*>([^<]+)</g; let m; const seen=new Set();
+  while((m=re.exec(r.data))){
+    const id=m[1]; if(seen.has(id)) continue; seen.add(id);
+    const b=document.createElement('button'); b.textContent=m[2].replace(/&amp;/g,'&').trim();
+    b.className='secondary'; b.onclick=()=>loadCourses(id); box.appendChild(b);
+  }
+  hide('step-college'); show('step-semester');
+}
+
+async function loadCourses(cat){
+  const r=await moodleGet(BASE+'/course/index.php?categoryid='+cat);
+  const re=/course\/view\.php\?id=(\d+)"[^>]*>([^<]+)<\/a>/g; let m;
+  const box=$('step-course'); box.innerHTML='<label>Courses</label>';
+  const seen=new Set();
+  while((m=re.exec(r.data))){
+    const id=m[1], name=m[2].replace(/<[^>]+>/g,'').trim();
+    if(!id||seen.has(id)) continue; seen.add(id);
+    const b=document.createElement('button'); b.textContent=name; b.className='secondary';
+    b.onclick=()=>loadFiles(id);
+    box.appendChild(b);
+  }
+  hide('step-semester'); show('step-course');
+}
+
+async function resourceName(url){
+  try{
+    const r=await moodleGet(url,true);
+    const cd=r.headers && (r.headers['content-disposition']||r.headers['Content-Disposition']||'');
+    const mm=cd.match(/filename[^=]*=\s*"?([^";]+)"?/i);
+    if(mm) return mm[1];
+  }catch(e){}
+  return url.split('/').pop()||'file';
+}
+
+async function loadFiles(cid){
+  const r=await moodleGet(BASE+'/course/view.php?id='+cid);
+  const html=r.data;
+  const re=/href="(https?:\/\/[^"]*?(?:mod\/resource\/view\.php\?id=\d+|pluginfile\.php\/[^"]+))"/g; let m;
+  const links=[]; const seen=new Set();
+  while((m=re.exec(html))){ const url=m[1].replace(/&amp;/g,'&'); if(!seen.has(url)){seen.add(url);links.push(url);} }
+  const items=[];
+  for(const url of links){
+    let finalUrl=url, name=url.split('/').pop();
+    if(/mod\/resource\/view\.php/.test(url)){
+      try{
+        const rr=await moodleGet(url,true);
+        finalUrl=rr.data===undefined?url:url; // binary; header has encoding
+      }catch(e){}
+      name=await resourceName(url);
+    } else if(/pluginfile\.php/.test(url)){
+      name=decodeURIComponent(url.split('pluginfile.php')[1].split('/').pop());
+    }
+    items.push({name,url:finalUrl});
+  }
+  renderFiles(items);
+}
+
+function renderFiles(items){
+  const box=$('step-files'); box.innerHTML='';
+  const bar=document.createElement('div'); bar.className='row'; bar.style.marginBottom='8px';
+  const all=document.createElement('button'); all.textContent='Select All'; all.className='btn-mini secondary';
+  const none=document.createElement('button'); none.textContent='Clear'; none.className='btn-mini secondary';
+  const dl=document.createElement('button'); dl.textContent='Download Selected';
+  all.onclick=()=>document.querySelectorAll('.file-item input').forEach(i=>i.checked=true);
+  none.onclick=()=>document.querySelectorAll('.file-item input').forEach(i=>i.checked=false);
+  dl.style.flex='2'; dl.onclick=()=>downloadItems(items);
+  bar.appendChild(all); bar.appendChild(none); bar.appendChild(dl);
+  box.appendChild(bar);
+  items.forEach((it,idx)=>{
+    const row=document.createElement('div'); row.className='file-item';
+    const cb=document.createElement('input'); cb.type='checkbox'; cb.dataset.idx=idx;
+    const nm=document.createElement('div'); nm.className='fname'; nm.textContent=it.name;
+    row.appendChild(cb); row.appendChild(nm); box.appendChild(row);
+  });
+  hide('step-course'); hide('step-semester'); show('step-files');
+}
+
+async function downloadItems(items){
+  const sel=[...document.querySelectorAll('.file-item input:checked')].map(i=>items[+i.dataset.idx]);
+  if(!sel.length){ alert('Select at least one file'); return; }
+  show('card-log'); $('log').textContent='';
+  for(const it of sel){
+    $('log').textContent+=`Downloading ${it.name} ...\n`;
+    try{
+      const r=await moodleGet(it.url,true);
+      if(typeof r.data==='string'){ $('log').textContent+=`  ERROR: ${r.data.slice(0,120)}\n`; continue; }
+      const blob=new Blob([r.data],{type:'application/octet-stream'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=it.name;
+      document.body.appendChild(a); a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),3000);
+      $('log').textContent+=`  Saved '${it.name}'\n`;
+    }catch(e){ $('log').textContent+=`  ERROR  ${e}\n`; }
+  }
+  $('log').textContent+='Done.\n';
+}
+
+// Back navigation
+$('btnBack').onclick=()=>{
+  if($('step-files')&&!$('step-files').classList.contains('hidden')){hide('step-files');show('step-course');}
+  else if($('step-course')&&!$('step-course').classList.contains('hidden')){hide('step-course');show('step-semester');}
+  else if($('step-semester')&&!$('step-semester').classList.contains('hidden')){hide('step-semester');show('step-college');}
+};
+</script>
+</body>
+</html>
