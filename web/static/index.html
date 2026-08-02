@@ -39,9 +39,12 @@
     <h2>Connect to Moodle</h2>
     <label>Server</label>
     <input id="server" value="https://elearning.kfu.edu.eg">
-    <label>MoodleSession cookie (from browser DevTools)</label>
-    <input id="cookie" placeholder="paste cookie...">
-    <button id="btnConnect">Connect</button>
+    <button id="btnLogin" class="secondary">Log in (opens login page)</button>
+    <div class="row" style="margin:6px 0">
+      <div style="flex:0 0 auto;display:flex;align-items:center;font-size:13px;opacity:.7">or paste cookie:</div>
+      <input id="cookie" placeholder="paste MoodleSession cookie..." style="flex:1">
+    </div>
+    <button id="btnConnect">Connect with cookie</button>
     <div class="status" id="connectStatus"></div>
   </div>
 
@@ -104,6 +107,26 @@ function statusFrom(r){
   if(typeof r.data==='string' && /login\/index\.php/.test(r.data)) return 'login';
   return 'ok';
 }
+
+$('btnLogin').addEventListener('click', async ()=>{
+  BASE=$('server').value.trim().replace(/\/+$/,'')||'https://elearning.kfu.edu.eg';
+  setText('connectStatus','Opening login page...');
+  try{
+    // Use the native login screen that auto-captures the MoodleSession cookie.
+    const P=window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.MoodleLogin;
+    if(!P){ setText('connectStatus','Login screen only available in the Android app.','bad'); return; }
+    const res=await P.login({ server: BASE });
+    COOKIE=res.cookie;
+    if(COOKIE){ $('cookie').value=''; setText('connectStatus','Logged in!','ok'); }
+    else{ setText('connectStatus','Login succeeded but no cookie was captured.','bad'); return; }
+    // Validate then proceed.
+    const r=await moodleGet(BASE+'/index.php');
+    const st=statusFrom(r);
+    if(st==='login'){ setText('connectStatus','FAILED: session invalid.','bad'); return; }
+    hide('card-connect'); show('card-main');
+    setText('who','');
+  }catch(e){ setText('connectStatus','ERROR: '+(e.message||e),'bad'); }
+});
 
 $('btnConnect').addEventListener('click', async ()=>{
   BASE=$('server').value.trim().replace(/\/+$/,'')||'https://elearning.kfu.edu.eg';
