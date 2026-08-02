@@ -2,19 +2,37 @@ package com.kfu.moodledl;
 
 import android.annotation.SuppressLint;
 import android.content.Intent;
+import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.Gravity;
+import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
-import android.widget.TextView;
 
 public class LoginActivity extends AppCompatActivity {
 
     public static final String EXTRA_SERVER = "server";
     private String server;
+    private WebView web;
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable poll = new Runnable() {
+        @Override
+        public void run() {
+            if (!isFinishing() && !isDestroyed() && tryCaptureToken()) {
+                return; // done
+            }
+            handler.postDelayed(this, 500);
+        }
+    };
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -25,19 +43,49 @@ public class LoginActivity extends AppCompatActivity {
         if (server == null || server.isEmpty()) {
             server = "https://elearning.kfu.edu.eg";
         }
+        if (!server.startsWith("http://") && !server.startsWith("https://")) {
+            server = "https://" + server;
+        }
 
         try {
             CookieManager.getInstance().setAcceptCookie(true);
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
 
-        WebView web = new WebView(this);
-        web.setLayoutParams(new android.view.ViewGroup.LayoutParams(
-            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-            android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+        // Layout: top return bar + webview below it.
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.parseColor("#0f172a"));
 
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(16, 12, 16, 12);
+        bar.setBackgroundColor(Color.parseColor("#1e293b"));
+
+        TextView title = new TextView(this);
+        title.setText("Log in to Moodle");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(16);
+        title.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        bar.addView(title);
+
+        Button close = new Button(this);
+        close.setText("Done");
+        close.setAllCaps(false);
+        close.setOnClickListener(v -> {
+            setResult(RESULT_CANCELED);
+            finish();
+        });
+        bar.addView(close);
+
+        LinearLayout.LayoutParams barLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        root.addView(bar, barLp);
+
+        web = new WebView(this);
+        WebSettings s = web.getSettings();
         try {
-            WebSettings s = web.getSettings();
             s.setJavaScriptEnabled(true);
             s.setDomStorageEnabled(true);
             s.setLoadWithOverviewMode(true);
@@ -46,30 +94,36 @@ public class LoginActivity extends AppCompatActivity {
             s.setSupportZoom(true);
             s.setBuiltInZoomControls(true);
             s.setDisplayZoomControls(false);
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
 
         try {
             web.setWebViewClient(new WebViewClient() {
                 @Override
                 public void onPageFinished(WebView view, String url) {
-                    try {
-                        if (tryCaptureToken()) {
-                            // done, result already set via setResult/finish
-                        }
-                    } catch (Throwable ignored) {
-                    }
+                    tryCaptureToken();
                 }
             });
         } catch (Throwable ignored) {
         }
 
-        setContentView(web);
+        LinearLayout.LayoutParams webLp = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        root.addView(web, webLp);
+
+        setContentView(root);
+
+        // Poll so the cookie is detected even if login does not call onPageFinished again.
+        handler.postDelayed(poll, 800);
 
         try {
-            web.loadUrl(server + "/login/index.php");
+            String url = server + "/login/index.php";
+            web.loadUrl(url);
         } catch (Throwable t) {
-            finishWithError(t);
+            try {
+                startActivity(new Intent(this, MainActivity.class));
+            } catch (Throwable ignored) {
+            }
         }
     }
 
@@ -78,6 +132,15 @@ public class LoginActivity extends AppCompatActivity {
         try {
             cookie = CookieManager.getInstance().getCookie(server);
         } catch (Throwable ignored) {
+        }
+        if (cookie == null || !cookie.contains("MoodleSession")) {
+            // Some devices store per-host; try bare host.
+            String host = server.replaceFirst("^(https?://)?(www\\.)?", "").replaceFirst("/.*$", "");
+            try {
+                String c2 = CookieManager.getInstance().getCookie(host);
+                if (c2 != null && c2.contains("MoodleSession")) cookie = c2;
+            } catch (Throwable ignored) {
+            }
         }
         if (cookie == null || !cookie.contains("MoodleSession")) {
             return false;
@@ -100,23 +163,21 @@ public class LoginActivity extends AppCompatActivity {
         data.putExtra("token", session);
         data.putExtra("cookie", full);
         setResult(RESULT_OK, data);
-        try { finish(); } catch (Throwable ignored) {}
-        return true;
-    }
-
-    private void finishWithError(Throwable t) {
-        try {
-            TextView tv = new TextView(this);
-            tv.setText("Login error: " + (t != null ? t.getMessage() : "unknown"));
-            setContentView(tv);
-        } catch (Throwable ignored) {
-            try { setResult(RESULT_CANCELED); finish(); } catch (Throwable ignored2) {}
+        handler.removeCallbacks(poll);
+        try { finish(); } catch (Throwable ignored) {
         }
+        return true;
     }
 
     @Override
     public void onBackPressed() {
         setResult(RESULT_CANCELED);
         finish();
+    }
+
+    @Override
+    protected void onDestroy() {
+        handler.removeCallbacks(poll);
+        super.onDestroy();
     }
 }
